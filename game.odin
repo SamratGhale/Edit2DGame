@@ -1,30 +1,10 @@
 package main
 
-import "core:fmt"
 import "vendor:glfw"
 import ion "shared:engine"
 import b2 "vendor:box2d"
+import "core:fmt"
 
-entity_type :: enum 
-{
-	PLAYER  = 1 << 0,
-	ENEMY   = 1 << 1,
-	NPC     = 1 << 2,
-	DOOR    = 1 << 3,
-}
-
-entity_def :: struct 
-{
-	using engine : ion.engine_entity_def,
-	type         : entity_type,
-	//test         : [dynamic]string,
-}
-
-entity :: struct 
-{
-	using engine : ion.engine_entity,
-	type         : entity_type,
-}
 
 play_state :: enum 
 {
@@ -118,11 +98,12 @@ game_to_engine_entities :: proc(game: ^game_state)
 	clear(&interface.entities)
 	clear(&interface.entity_defs)
 	
-	for &entity in &level.entities do append(&interface.entities,    &entity.engine)
-	for &def in &level.entity_defs do append(&interface.entity_defs, &def.engine)
+	for &entity in &level.entities    do append(&interface.entities,    &entity.engine)
+	for &def    in &level.entity_defs do append(&interface.entity_defs, &def.engine)
 	
 	interface.state = &state
 	interface.world = &level.engine
+
 }
 
 
@@ -132,18 +113,27 @@ game_update :: proc(game :^game_state)
 	
 	game_to_engine_entities(game)
 	
-	if ion.interface_all(&game.interface) do level_reload(level)
+	if game.play == .PAUSE{
+		if ion.interface_all(&game.interface) do level_reload(level)
+	}
 	
 	if game.interface.selected_entity^ <0{
 		game.interface.selected_entity^ = 0
 	}
 		
-	if game.play == .PAUSE{
-		def   := &level.entity_defs[game.interface.selected_entity^]
-		ion.points_add(&state.draw.points, def.body_def.position, 20.0, b2.HexColor.Plum)
+	if game.play == .PAUSE
+	{
+
+		//If we're editing joint then highlight all the entitites pointed by the joint
+
+		if game.interface.edit_mode != .JOINT{
+			def   := &level.entity_defs[game.interface.selected_entity^]
+			ion.points_add(&state.draw.points, def.body_def.position, 20.0, b2.HexColor.Plum)
+		}
+
 	}
 	
-	if ion.is_key_pressed(&state, glfw.KEY_SPACE)
+	if ion.is_key_pressed(&state, glfw.KEY_P)
 	{
 		if game.play == .PLAY do game.play = .PAUSE 
 		else do game.play = .PLAY
@@ -152,20 +142,34 @@ game_update :: proc(game :^game_state)
 	if game.play == .PAUSE
 	{
 		if interface_no_gui(&state, game) do level_reload(level)
+		if game_interface(&state, game)   do level_reload(level)
 	}
 	
-	if game_interface(&state, game) do level_reload(level)
 	
 	if game.play == .PLAY
 	{
-		
-		for &entity in &level.entities
-		{
-			if entity.type == .PLAYER
-			{
-				update_player(game, &entity)
+		player_update(game, &level.player)
+
+		for e in  level.entities{
+			if e.type == .GEARLIFT{
+				//b2.RevoluteJoint_SetMaxMotorTorque(e.joint_id, 20.20)
+				//b2.RevoluteJoint_SetMotorSpeed(e.joint_id, 20.20)
+
+				/*
+				rot := b2.Body_GetRotation(e.body_id)
+				ang := b2.Rot_GetAngle(rot) * ion.RAD2DEG
+
+
+				if ang <= 178{
+					b2.Body_SetAngularVelocity(e.body_id, 1.0 )
+				}else{
+					b2.Body_SetAngularVelocity(e.body_id, -1.0 )
+				}
+				*/
+
 			}
 		}
+		
 		b2.World_Step(level.world_id, 0.01666, 4)
 	}
 	

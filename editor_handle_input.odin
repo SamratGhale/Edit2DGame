@@ -2,7 +2,6 @@ package main
 
 import ion "shared:engine"
 import array "core:container/small_array"
-import "core:fmt"
 import "vendor:glfw"
 import im "shared:odin-imgui"
 import b2 "vendor:box2d"
@@ -17,30 +16,6 @@ interface_glfw_mousewhell_callback :: proc "c" (
 }
 
 
-
-default_entity_def :: proc () -> entity_def
-{
-	ret : entity_def
-	ret.body_def   = b2.DefaultBodyDef()
-	ret.shape_def  = b2.DefaultShapeDef()
-	ret.shape_type = .circleShape
-	ret.scale      = 1
-	ret.centers    = {{-10, 0}, {10, 0}}
-	ret.size       = {2, 2}
-
-	//for dynamic polygon
-	vs : [4]b2.Vec2 = {
-		{-1.0, -1.0},
-		{-1.0, 1.0},
-		{1.0, 1.0},
-		{1.0, -1.0},
-	}
-	ret.is_loop = true
-
-	for v in vs do array.push_back(&ret.vertices, v)
-
-	return ret
-}
 
 interface_click_query_filter :: proc "c" (shape_id: b2.ShapeId, ctx: rawptr) -> bool 
 {
@@ -77,7 +52,7 @@ interface_no_gui :: proc(state:^ion.engine_state, game: ^game_state) -> bool
 		level_save_to_file(level)
 	}
 	
-	if im.GetIO().WantCaptureMouse do return false
+	if im.GetIO().WantCaptureMouse    do return false
 	if im.GetIO().WantCaptureKeyboard do return false
 	
 	input := &state.input
@@ -110,8 +85,6 @@ interface_no_gui :: proc(state:^ion.engine_state, game: ^game_state) -> bool
 				
 				new_def                  := default_entity_def()
 				new_def.body_def.position = mpos
-				new_def.body_def.type     = .staticBody
-				new_def.radius            = 1
 				
 				game.interface.selected_entity^ = i32(len(level.entity_defs))
 				append(&level.entity_defs, new_def)

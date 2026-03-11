@@ -1,5 +1,10 @@
 package main
 
+/**
+	File and folder structure of the game
+**/
+
+
 import ion "shared:engine"
 
 WIDTH  :: 1920

@@ -1,0 +1,347 @@
+/*
+package main
+
+import "base:runtime"
+import "vendor:glfw"
+import b2 "vendor:box2d"
+import "core:fmt"
+import ion "shared:engine"
+
+
+CollisionBits :: enum u64
+{
+	StaticBit  = 0x0001,
+	MoverBit   = 0x0002,
+	DynamicBit = 0x0004,
+	DebrisBit  = 0x0008,
+	AllBits    = 0xffff,
+}
+
+CastResult :: struct 
+{
+	point, normal : b2.Vec2,
+	body_id       : b2.BodyId,
+	fraction      : f32,
+	hit           : bool,
+}
+
+PLANE_CAPACITY :i32: 8 
+
+game_player :: struct 
+{
+	transform : b2.Transform,
+	velocity  : b2.Vec2,
+	capsule   : b2.Capsule,
+	ball_id   : b2.ShapeId,
+
+	friendly_shape : ShapeUserData,
+	
+	planes    : [PLANE_CAPACITY]b2.CollisionPlane,
+	
+	jump_speed : f32,
+	max_speed  : f32,
+	min_speed  : f32,
+	stop_speed : f32,
+	accelerate : f32,
+	air_steer  : f32,
+	friction   : f32,
+	gravity    : f32,
+	pogo_hertz : f32,
+	pogo_damping_ratio : f32,
+	pogo_velocity      : f32,
+	time               : f32,
+	
+	plane_count      : i32,
+	total_iterations : i32,
+	
+	on_ground     : bool,
+	jump_released : bool,
+	lock_camera   : bool,
+	
+	world_id      : b2.WorldId,
+}
+
+cast_callback :: proc "c" (
+	shape_id      : b2.ShapeId,
+	point, normal : b2.Vec2,
+	fraction      : f32,
+	ctx           : rawptr
+) -> f32
+{
+	result         := cast(^CastResult)ctx
+	result.point    = point
+	result.normal   = normal
+	result.body_id  = b2.Shape_GetBody(shape_id)
+	result.fraction = fraction
+	result.hit      = true
+	return fraction
+}
+
+ShapeUserData :: struct
+{
+	max_push : f32,
+	clip_velocity : bool,
+}
+
+plane_result_fcn :: proc "c" (shape_id : b2.ShapeId, plane_result : ^b2.PlaneResult, ctx : rawptr) -> bool
+{
+	context = runtime.default_context()
+	assert(plane_result.hit == true)
+	
+	self          := cast(^game_player)ctx
+	max_push      := max(f32)
+	clip_velocity := true
+	user_data     := cast(^ShapeUserData)b2.Shape_GetUserData(shape_id)
+	if user_data  != nil
+	{
+		max_push      = user_data.max_push
+		clip_velocity = user_data.clip_velocity
+	}
+	
+	if self.plane_count < PLANE_CAPACITY
+	{
+		assert(b2.IsValidPlane(plane_result.plane))
+		self.planes[self.plane_count] = {plane_result.plane, max_push, 0, clip_velocity}
+		self.plane_count +=1
+	}
+	return true
+}
+
+solve_move :: proc(player: ^game_player, time_step, throttle : f32)
+{
+	speed := b2.Length(player.velocity)
+	
+	if speed < player.min_speed do player.velocity = {0, 0}
+	else if player.on_ground
+	{
+		//Linear damping above stop_speed and fixed reduction below stop speed
+		//Friction has speed of 1/time
+		control   := speed < player.stop_speed ? player.stop_speed : speed
+		drop      := control * player.friction * time_step
+		new_speed := max(0.0, speed - drop)
+		player.velocity *= new_speed/speed
+	}
+	
+	desired_velocity : b2.Vec2 = {player.max_speed * throttle, 0}
+	
+	desired_speed, desired_direction := b2.GetLengthAndNormalize(desired_velocity)
+	
+	if desired_speed > player.max_speed do desired_speed = player.max_speed
+	
+	if player.on_ground do player.velocity.y = 0
+	
+	//Accelerate
+	current_speed := b2.Dot(player.velocity, desired_direction)
+	add_speed     := desired_speed - current_speed
+	
+	if add_speed > 0.0
+	{
+		steer       := player.on_ground ? 1.0 : player.air_steer
+		accel_speed := steer * player.accelerate * player.max_speed * time_step
+		
+		if accel_speed > add_speed do accel_speed = add_speed
+		
+		player.velocity += accel_speed * desired_direction
+	}
+	player.velocity.y -=  player.gravity * time_step
+	
+	pogo_rest_length := 3.0 * player.capsule.radius
+	ray_length       := pogo_rest_length + player.capsule.radius
+	origin           := b2.TransformPoint(player.transform, player.capsule.center1)
+	circle           : b2.Circle  = {origin, 0.5 * player.capsule.radius}
+	segment_offset   : b2.Vec2    = {0.75 * player.capsule.radius, 0} 
+	segment          : b2.Segment = {
+		point1 = origin - segment_offset,
+		point2 = origin + segment_offset
+	}
+	
+	proxy       : b2.ShapeProxy
+	translation : b2.Vec2
+	pogo_filter : b2.QueryFilter = {
+		u64(CollisionBits.MoverBit), 
+		u64(CollisionBits.StaticBit | CollisionBits.DynamicBit)
+	}
+	
+	cast_result : CastResult
+	
+	//Pogo shape always segment
+	
+	proxy       = b2.MakeProxy({segment.point1, segment.point2}, 0)
+	translation = {0, -ray_length}
+	
+	res := b2.World_CastShape(player.world_id, proxy, translation, pogo_filter, cast_callback, &cast_result)
+	
+	if !player.on_ground 
+	{
+		player.on_ground = cast_result.hit && player.velocity.y <= 0.1
+	}else
+	{
+		player.on_ground = cast_result.hit
+	}
+	
+	if !cast_result.hit 
+	{
+		player.pogo_velocity = 0
+		
+		delta := translation
+		
+		ion.lines_add(&state.draw.lines, origin, origin + delta, b2.HexColor.Gray)
+		
+		ion.lines_add(&state.draw.lines, segment.point1 + delta, segment.point2+ delta, b2.HexColor.Gray)
+	}
+	else 
+	{
+		pogo_current_length := cast_result.fraction * ray_length
+		
+		offset := pogo_current_length - pogo_rest_length
+		
+		pogo_velocity := b2.b2SpringDamper(player.pogo_hertz, player.pogo_damping_ratio, offset, player.pogo_velocity, time_step)
+		
+		delta := cast_result.fraction * translation
+		
+		ion.lines_add(&state.draw.lines, origin, origin + delta, b2.HexColor.Gray)
+		
+		ion.lines_add(&state.draw.lines, segment.point1 + delta, segment.point2 + delta, b2.HexColor.Plum)
+		
+		b2.Body_ApplyForce(cast_result.body_id, { 0.0, -50.0}, cast_result.point, true)
+		
+	}
+	
+	target := player.transform.p + time_step * player.velocity + time_step * player.pogo_velocity * b2.Vec2{0.0, 1.0}
+	
+	//Mover overlap filter
+	collide_filter :b2.QueryFilter = {u64(CollisionBits.MoverBit), u64(CollisionBits.StaticBit| CollisionBits.DynamicBit| CollisionBits.MoverBit)}
+	
+	//Moves don't sweep against other movers, allows for soft collision
+	cast_filter : b2.QueryFilter = {u64(CollisionBits.MoverBit), u64(CollisionBits.StaticBit| CollisionBits.DynamicBit)} 
+	
+	player.total_iterations = 0
+	tolerance : f32 = 0.01
+	
+	for iteration in 0..<5
+	{
+		player.plane_count = 0
+		
+		mover : b2.Capsule
+		mover.center1 = b2.TransformPoint(player.transform, player.capsule.center1)
+		mover.center2 = b2.TransformPoint(player.transform, player.capsule.center2)
+		mover.radius  = player.capsule.radius
+		
+		b2.World_CollideMover(player.world_id, mover, collide_filter, plane_result_fcn, player)
+		result := b2.SolvePlanes(target - player.transform.p, player.planes[:])
+		
+		player.total_iterations += result.iterationCount
+		
+		fraction := b2.World_CastMover(player.world_id, mover, result.translation, cast_filter)
+		
+		delta := fraction * result.translation
+		player.transform.p += delta
+		
+		if b2.LengthSquared(delta) < tolerance * tolerance
+		{
+			break
+		}
+	}
+	
+	player.velocity = b2.ClipVector(player.velocity, player.planes[:player.plane_count])
+}
+
+HERTZ     : f32 : 60.0
+TIME_STEP : f32 : 1.0/HERTZ
+
+update_player :: proc(game: ^game_state, player: ^game_player)
+{
+
+	time_step := TIME_STEP
+	if game.play == .PAUSE
+	{
+		time_step = 0
+	}
+
+	player.time += time_step
+
+	if game.play == .PLAY
+	{
+
+		throttle : f32 = 0
+
+		if ion.is_key_down(&state, glfw.KEY_A) do throttle -= 10.0
+
+		if ion.is_key_down(&state, glfw.KEY_D) do throttle += 10.0
+
+		if ion.is_key_pressed(&state, glfw.KEY_SPACE)
+		{
+			if player.on_ground && player.jump_released
+			{
+				player.velocity.y    = player.jump_speed
+				player.on_ground     = false
+				player.jump_released = false
+			}
+		} else
+		{
+			player.jump_released = true
+		}
+
+		solve_move(player, time_step, throttle)
+	}
+
+	count := player.plane_count
+
+	for i in 0..<count
+	{
+		plane := player.planes[i].plane
+
+		p1 : b2.Vec2 = player.transform.p + ( plane.offset - player.capsule.radius) * plane.normal
+		p2 : b2.Vec2 = p1 + 0.1 * plane.normal
+
+		ion.points_add(&state.draw.points, p1, 5.0, b2.HexColor.Yellow)
+		ion.lines_add(&state.draw.lines,   p1, p2,  b2.HexColor.Yellow)
+	}
+
+	p1 := b2.TransformPoint(player.transform, player.capsule.center1)
+	p2 := b2.TransformPoint(player.transform, player.capsule.center2)
+
+
+	color := player.on_ground ? b2.HexColor.Orange : b2.HexColor.Aquamarine
+
+	ion.solid_capsules_add(&state.draw.solid_capsules, p1, p2, player.capsule.radius, color)
+	ion.lines_add(&state.draw.lines, player.transform.p, player.transform.p + player.velocity, b2.HexColor.Purple) 
+}
+
+
+create_player :: proc(world_id: b2.WorldId, player: ^game_player)
+{
+	player.world_id = world_id
+
+	player.capsule   = { { 0.0, -9.5 }, { 0.0, 9.5 }, 9.3 }
+	player.transform = {{-22.0, 8.0}, b2.Rot_identity} 
+
+
+	{
+		body_def         := b2.DefaultBodyDef()
+		body_def.position = {-229, 17.5}//def.body_def.position
+
+		shape_def    := b2.DefaultShapeDef()
+
+		player.friendly_shape.max_push      = 0.025
+		player.friendly_shape.clip_velocity = false
+
+		shape_def.filter = {u64(CollisionBits.MoverBit), u64(CollisionBits.AllBits), 0}
+		shape_def.userData = &player.friendly_shape
+		body_id  := b2.CreateBody(world_id, body_def)
+
+		shape_id := b2.CreateCapsuleShape(body_id, shape_def,  player.capsule)
+	}
+}
+
+
+
+*/
+
+
+
+
+
+
+
+

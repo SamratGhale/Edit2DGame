@@ -18,14 +18,12 @@ game_level :: struct
 	entity_defs  : [dynamic]entity_def,
 	
 	name         : string,
-	joints       : [dynamic]b2.JointId `cbor:"-"`,
-	
 	
 	cam          : ion.Camera,
-	
+
+	player       : game_player,
+	player_index : i32,
 }
-
-
 
 cbor_flags : cbor.Encoder_Flags : 
 {
@@ -109,11 +107,9 @@ level_init_from_path :: proc(game: ^game_state, path : string)
 		{
 			level_reload(curr_level)
 			state.draw.cam = curr_level.cam
-			fmt.println(curr_level.relations_serializeable)
 			
 			for key, val in curr_level.relations_serializeable
 			{
-				fmt.println(val)
 				index  := curr_level.static_indexes[key]
 				entity := curr_level.entities[index]
 				
@@ -122,6 +118,9 @@ level_init_from_path :: proc(game: ^game_state, path : string)
 			}
 		}
 	}
+
+
+	//create_player(curr_level.world_id, &curr_level.player)
 	delete(data)
 }
 
@@ -227,20 +226,57 @@ level_reload :: proc(level: ^game_level)
 	
 	{
 		world_def        := b2.DefaultWorldDef()
-		world_def.gravity = { 0, 0}
+		b2.SetLengthUnitsPerMeter(LPUM)
+		world_def.gravity = { 0, -9.8 * LPUM}
 		level.world_id    = b2.CreateWorld(world_def)
 	}
 	
 	for &def, i in &level.entity_defs
 	{
-		new_engine_entity := ion.engine_entity_new(&def, level.world_id, i32(i))
-		new_entity        := entity{engine = new_engine_entity, type = def.type}
+		new_entity := entity_create_by_type(&def, level.world_id, i32(i))
 		
 		append(&level.entities, new_entity)
 		
-		
 		if new_entity.index != nil do level.static_indexes[new_entity.index^] = i
+
+		if new_entity.type == .PLAYER
+		{
+			level.player_index = i32(i)
+		}
 	}
-	
-	
+
+	//Initilize joints one by one
+	{
+		for &def in &level.distant_joint_defs
+		{
+
+			//Get entity_a and entity_b
+
+			if def.entity_a <= 0 do continue
+			if def.entity_b <= 0 do continue
+
+			entity_a   := &level.entities[level.static_indexes[def.entity_a]]
+			def.bodyIdA = entity_a.body_id
+
+			entity_b   := &level.entities[level.static_indexes[def.entity_b]]
+			def.bodyIdB = entity_b.body_id
+
+			append(&level.joints, b2.CreateDistanceJoint(level.world_id, def.def))
+		}
+	}
+	level.player.e = &level.entities[level.player_index]
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
