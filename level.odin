@@ -249,7 +249,6 @@ level_reload :: proc(level: ^game_level)
 	{
 		for &def in &level.distant_joint_defs
 		{
-
 			//Get entity_a and entity_b
 
 			if def.entity_a <= 0 do continue
@@ -262,6 +261,22 @@ level_reload :: proc(level: ^game_level)
 			def.bodyIdB = entity_b.body_id
 
 			append(&level.joints, b2.CreateDistanceJoint(level.world_id, def.def))
+		}
+
+		for &def in &level.revolute_joint_defs
+		{
+			//Get entity_a and entity_b
+
+			if def.entity_a <= 0 do continue
+			if def.entity_b <= 0 do continue
+
+			entity_a   := &level.entities[level.static_indexes[def.entity_a]]
+			def.bodyIdA = entity_a.body_id
+
+			entity_b   := &level.entities[level.static_indexes[def.entity_b]]
+			def.bodyIdB = entity_b.body_id
+
+			append(&level.joints, b2.CreateRevoluteJoint(level.world_id, def.def))
 		}
 	}
 	level.player.e = &level.entities[level.player_index]
