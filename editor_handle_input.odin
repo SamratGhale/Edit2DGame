@@ -1,6 +1,6 @@
 package main
 
-import ion "shared:engine"
+import ion "shared:Edit2D"
 import array "core:container/small_array"
 import "vendor:glfw"
 import im "shared:odin-imgui"

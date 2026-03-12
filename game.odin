@@ -1,7 +1,7 @@
 package main
 
 import "vendor:glfw"
-import ion "shared:engine"
+import ion "shared:Edit2D"
 import b2 "vendor:box2d"
 import "core:fmt"
 

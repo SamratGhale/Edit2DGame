@@ -1,6 +1,6 @@
 package main
 
-import ion "shared:engine"
+import ion "shared:Edit2D"
 import b2 "vendor:box2d"
 import array "core:container/small_array"
 

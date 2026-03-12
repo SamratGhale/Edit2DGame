@@ -5,7 +5,7 @@ package main
 **/
 
 
-import ion "shared:engine"
+import ion "shared:Edit2D"
 
 WIDTH  :: 1920
 HEIGHT :: 1080
